@@ -1,9 +1,9 @@
 
 # ELSPHTM17.FOX: Direct Calculation of the Transfer Map of Electrostatic Deflectors
-Authors: E. Valetov, K. Makino, and M. Berz  
+Authors: Eremey Valetov, Kyoko Makino, and Martin Berz  
 Organization: Michigan State University  
 Creation date: 01-Nov-2017  
-Email: valetove@msu.edu
+Email: valetove@msu.edu  
 Note: Prepared by K. Makino based on E. Valetov's codes
 
 ## 1. Description
