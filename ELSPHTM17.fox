@@ -1,0 +1,318 @@
+{ELSPHTM17.fox              11/1/2017
+                            - prepared by K. Makino based on E. Valetov's codes
+
+This program contains all the test cases reported in
+
+E. Valetov, M. Berz, and K. Makino
+Direct Calculation of the Transfer Map of Electrostatic Deflectors, and
+Comparison with the Codes COSY INFINITY and GIOS
+MSUHEP-171023, Michigan State University (2017)}
+
+INCLUDE 'COSY' ;
+
+PROCEDURE G123 ;
+   VARIABLE G1 1 ; VARIABLE G2 1 ; VARIABLE G3 1 ;
+   G1 := ME(1,1)*ME(2,2) -ME(2,1)*ME(1,2) -1 ;
+   G2 := ME(1,1)*ME(2,12)-ME(2,1)*ME(1,12)
+        +ME(1,11)*2*ME(2,2)-ME(2,11)*2*ME(1,2) ;
+   G3 := ME(1,1)*ME(2,22)*2-ME(2,1)*ME(1,22)*2
+        +ME(1,12)*ME(2,2)-ME(2,12)*ME(1,2) ;
+   WRITE 6 'G1, G2, G3' G1 G2 G3 ;
+  {WRITE 6 'SE' SE(MAP) ;}
+   ENDPROCEDURE ;
+
+PROCEDURE RUN ; 
+   VARIABLE IEL 1 ; VARIABLE MTD 1 ; VARIABLE NMTD 1 2 ;
+   VARIABLE SEL 20 2 ; VARIABLE SMTD 100 2 4 ;
+   VARIABLE IMTD 1 ; VARIABLE LMTD 1 ; VARIABLE PICK 1 ;
+
+   PROCEDURE RUNODE ;
+      VARIABLE Y1 4000 8 ; VARIABLE YT 4000 8 ;
+      VARIABLE XX0 4000 ; {Initial DA-valued x coordinate}
+      VARIABLE XX1 4000 ; {Final DA-valued x coordinate}
+      VARIABLE AA0 4000 ; {Initial DA-valued a coordinate}
+      VARIABLE AA1 4000 ; {Final DA-valued a coordinate}
+      VARIABLE NM 1 ; {DA variable size}
+      VARIABLE MU 1 ; {mu}
+      VARIABLE HPAR 4000 ; {h}
+      VARIABLE M 4000 5 ; VARIABLE J 1 ;
+
+      PROCEDURE FNC F X T ;
+          {FUNCTION F(X,T) DEFINING THE ODEs OF MOTION
+              X  COORDINATES VECTOR
+              T  TIME (OR ARC LENGTH) }
+          F(1) := X(2)/X(4) ; {r'}
+        IF IEL=1 ;
+          F(2) := -MU/X(1)/X(1)/X(4) + X(1)*X(4) ; {v_r'}
+        ELSEIF IEL=2 ;
+          F(2) := -MU/X(1)/X(4) + X(1)*X(4) ; {v_r'}
+        ENDIF ;
+          F(3) := 1 ; {theta'}
+          F(4) := -2*HPAR/X(1)/X(1)/X(1) * X(2)/X(4) ; {omega'}
+      ENDPROCEDURE ;
+
+      PROCEDURE RK4A N X0 X1 Y0 NS Y1 ;
+          {FOURTH ORDER RUNGE KUTTA INTEGRATOR}
+          VARIABLE I 1 ; VARIABLE J 1 ; VARIABLE T 1 ;
+	      VARIABLE Z1 NM 8 ; VARIABLE Z2 NM 8 ;
+	      VARIABLE Z3 NM 8 ; VARIABLE Z4 NM 8 ;
+          VARIABLE Z5 NM 8 ; VARIABLE F NM 8 ;
+          VARIABLE HS1 1 ;
+          T := X0 ;
+          HS1 := (X1-X0)/NS ;
+          LOOP J 1 N ; Y1(J) := Y0(J) ; ENDLOOP ;
+          LOOP I 1 NS ;
+              FNC F Y1 T ;
+              LOOP J 1 N ; Z1(J) := HS1*F(J) ; ENDLOOP ;
+              LOOP J 1 N ; Z5(J) := Y1(J) + Z1(J)/2 ; ENDLOOP ;
+              FNC F Z5 T+HS1/2 ;
+              LOOP J 1 N ; Z2(J) := HS1*F(J) ; ENDLOOP ;
+              LOOP J 1 N ; Z5(J) := Y1(J) + Z2(J)/2 ; ENDLOOP ;
+              FNC F Z5 T+HS1/2 ;
+              LOOP J 1 N ; Z3(J) := HS1*F(J) ; ENDLOOP ;
+              LOOP J 1 N ; Z5(J) := Y1(J) + Z3(J) ; ENDLOOP ;
+              FNC F Z5 T+HS1 ;
+              LOOP J 1 N ; Z4(J) := HS1*F(J) ; ENDLOOP ;
+              LOOP J 1 N ;
+        	      Y1(J) := Y1(J) + (1/6)*(Z1(J)+2*Z2(J)+2*Z3(J)+Z4(J)) ;
+              ENDLOOP ;
+              T := T + HS1 ;
+          ENDLOOP ;
+      ENDPROCEDURE ;
+
+      PROCEDURE KEPLERODEPOLAR R00 PHI X0 A0 X1 A1 ;
+          {This procedure calculates the transfer map of the electrostatic
+          deflector in (x,a) coordinates by integrating the ODE's of motion
+          in laboratory coordinates using a Runge-Kutta integrator.
+          Input parameters:
+              IEL    1: Spherical,  2: Cylindrical
+              R00    Radius of the circular reference orbit
+              PHI    Central angle of tracked sector of the deflector
+              X0     Initial x coordinate
+              A0     Initial a coordinate
+              X1     Final x coordinate
+              A1     Final a coordinate }
+          VARIABLE R0 NM 2 ; {Initial radius vector}
+          VARIABLE W0 NM 2 ; {Initial velocity vector}
+          VARIABLE R1 NM 2 ; {Final radius vector}
+          VARIABLE W1 NM 2 ; {Final velocity vector}
+          VARIABLE DOT NM ; {A scalar product}
+          VARIABLE R0S NM ; {Initial radius magnitude}
+          VARIABLE RS NM ; {Final radius magnitude}
+          VARIABLE SIGMA0 NM ; {sigma_0}
+          VARIABLE P NM ; {Focal parameter}
+          VARIABLE F NM ; VARIABLE G NM ; {Lagrange coefficients F, G}
+          VARIABLE FT NM ; VARIABLE GT NM ; {Lagrange coefficients FT, GT}
+          VARIABLE V0 NM ; {Reference velocity}
+          VARIABLE V1 NM ; {Initial velocity magnitude}
+          VARIABLE V2 NM ; {Final velocity magnitude}
+          VARIABLE CHIE 1 ; {Electric rigidity}
+          PHI := PHI*DEGRAD ;
+          V0 := CONS(SQRT(2*ETA)*CLIGHT) ;
+          R0(1) := X0 + R00 ; R0(2) := 0 ;
+          CHIE := AMU*RE(M0)*V0*V0 / Z0/EZERO ; {R00*CHIE}
+        IF IEL=1 ;
+          V1 := SQRT(V0^2-2*Z0*EZERO*CHIE*(1-R00/(R0(1)))/AMU/RE(M0)) ;
+        ELSEIF IEL=2 ;
+          V1 := SQRT( V0^2-2*Z0*EZERO*CHIE*R00*LOG(R0(1)/R00) /AMU/RE(M0)) ;
+        ENDIF ;
+          W0(1) := A0*V0 ; W0(2) := SQRT(V1*V1-W0(1)*W0(1)) ; 
+          MU := R00*CONS(V1)^2 ;
+          HPAR := R0(1)*W0(2) ;
+          YT(1) := R0(1) ;
+          YT(2) := W0(1) ;
+          YT(3) := 0 ;
+          YT(4) := W0(2)/YT(1) ;
+          {RK8A 4 0 PHI YT HS Y1 1e-5 RESCODE ;}
+          RK4A 4 0 PHI YT 1e6 Y1;
+          X1 := Y1(1) - R00 ;
+          V2 := SQRT(Y1(2)*Y1(2)+Y1(1)*Y1(1)*Y1(4)*Y1(4)) ;
+          A1 := Y1(2) / CONS(V2) ;
+      ENDPROCEDURE ;
+
+      OV 3 1 0 ; 
+      RP 1 1 1 ; 
+
+      NM := 4000 ;
+      XX0 := DA(1) ; AA0 := DA(2) ;
+
+      KEPLERODEPOLAR 1 45 XX0 AA0 XX1 AA1 ;
+      WRITE 6 'TRANSFER MAP OBTAINED IN LAB COORDINATES' ;
+      WRITE 6 'BY INTEGRATION OF THE ODEs' ;
+      WRITE 6 'X_f' XX1 'A_f' AA1 ;
+
+      MAP(1) := XX1 ; MAP(2) := AA1 ;
+   ENDPROCEDURE ; 
+
+   PROCEDURE RUNKEPLER ;
+      VARIABLE XX0 4000 ; {Initial DA-valued x coordinate}
+      VARIABLE XX1 4000 ; {Final DA-valued x coordinate}
+      VARIABLE AA0 4000 ; {Initial DA-valued a coordinate}
+      VARIABLE AA1 4000 ; {Final DA-valued a coordinate}
+      VARIABLE NM 1 ; {DA variable size}
+      VARIABLE M 4000 5 ; VARIABLE J 1 ;
+
+      PROCEDURE KEPLERANALYTICPOLAR R00 PHI X0 A0 X1 A1 ;
+          VARIABLE R0 NM 2 ; {Initial radius vector}
+          VARIABLE W0 NM 2 ; {Initial velocity vector}
+          VARIABLE R1 NM 2 ; {Final radius vector}
+          VARIABLE W1 NM 2 ; {Final velocity vector}
+          VARIABLE MU NM ; {mu}
+          VARIABLE DOT NM ; {A scalar product}
+          VARIABLE R0S NM ; {Initial radius}
+          VARIABLE RS NM ; {Final radius}
+          VARIABLE SIGMA0 NM ; {sigma_0}
+          VARIABLE P NM ; {Focal parameter p}
+          VARIABLE F NM ; VARIABLE G NM ; {Lagrange coefficients F and G}
+          VARIABLE FT NM ; VARIABLE GT NM ; {Lagrange coefficients F_t and G_t}
+          VARIABLE V0 NM ; {Initial velocity at zero potential}
+          VARIABLE V1 NM ; {Initial velocity}
+          VARIABLE V2 NM ; {Final velocity}
+          VARIABLE CHIE 1 ; {Electric rigidity}
+          PHI := PHI*DEGRAD ;
+          V0 := CONS(SQRT(2*ETA)*CLIGHT) ;
+          R0(1) := X0 + R00 ; R0(2) := 0 ;
+          CHIE := AMU*RE(M0)*V0*V0 / Z0/EZERO ; {R00*CHIE}
+          V1 := SQRT(V0^2 - 2*Z0*EZERO*CHIE*(1-R00/(R0(1)))/AMU/RE(M0)) ;
+          W0(1) := A0*V0 ;
+          W0(2) := SQRT(V1*V1-W0(1)*W0(1)) ; 
+          MU := R00*CONS(V1)^2 ;
+          DOT := R0(1)*W0(1) + R0(2)*W0(2) ;
+          SIGMA0 := DOT/SQRT(MU) ;
+          P := ((R0(1)*R0(1)+R0(2)*R0(2))*(W0(1)*W0(1)+W0(2)*W0(2))-DOT*DOT)
+               / MU ;
+          R0S := R0(1) ;
+          RS := P*R0S / (R0S+(P-R0S)*COS(PHI)-SQRT(P)*SIGMA0*SIN(PHI)) ;
+          F := 1 - (RS/P)*(1-COS(PHI)) ;
+          G := (RS*R0S/SQRT(MU*P)) * SIN(PHI) ;
+          FT := (SQRT(MU)/R0S/P) * (SIGMA0*(1-COS(PHI))-SQRT(P)*SIN(PHI)) ;
+          GT := 1 - (R0S/P)*(1-COS(PHI)) ;
+          R1(1) := F*R0(1) + G*W0(1) ; R1(2) := F*R0(2) + G*W0(2) ; 
+          W1(1) := FT*R0(1) + GT*W0(1) ; W1(2) := FT*R0(2) + GT*W0(2) ; 
+          X1 := (COS(PHI)*R1(1)+SIN(PHI)*R1(2)) - R00 ;
+          V2 := SQRT(W1(1)*W1(1)+W1(2)*W1(2)) ;
+          A1 := (COS(PHI)*W1(1)+SIN(PHI)*W1(2)) / CONS(V2) ;
+      ENDPROCEDURE ;
+
+      IF IEL=2 ; WRITE 6
+        'ERROR, the analytical solution method using Kepler theory is not'
+        '       to be used for the cylindrical deflector.' ; QUIT 0 ; ENDIF ;
+
+      OV 3 1 0 ; 
+      RP 1 1 1 ; 
+
+      NM := 4000 ;
+      XX0 := DA(1) ; AA0 := DA(2) ;
+
+      KEPLERANALYTICPOLAR 1 45 XX0 AA0 XX1 AA1 ;
+      WRITE 6 'TRANSFER MAP OBTAINED IN LAB COORDINATES' ;
+      WRITE 6 'USING LAGRANGE COEFFICIENTS' ;
+      WRITE 6 'X_f' XX1 'A_f' AA1 ;
+
+      MAP(1) := XX1 ; MAP(2) := AA1 ;
+   ENDPROCEDURE ;
+
+   PROCEDURE RUNCOSY ;
+      OV 3 1 0 ;
+      RP 1E-7 1 1 ;
+
+      UM ;
+    IF IEL=1 ;
+      ESP 1 45 0.1 ; {Electrostatic sphericcal deflector}
+      WRITE 6 'TRANSFER MAP OF COSY INFINITY''S ESP ELEMENT' '' ;
+    ELSEIF IEL=2 ;
+      ECL 1 45 0.1 ; {Electrostatic clyindrical deflector}
+      WRITE 6 'TRANSFER MAP OF COSY INFINITY''S ECL ELEMENT' '' ;
+    ENDIF ;
+      WRITE 6 'X_f' MAP(1) 'A_f' MAP(2) ;
+      ENDPROCEDURE ;
+
+   PROCEDURE RUNGIOS ;
+      VARIABLE XX  1 ; VARIABLE AX  1 ;
+      VARIABLE XA  1 ; VARIABLE AA  1 ;
+      VARIABLE XXX 1 ; VARIABLE AXX 1 ;
+      VARIABLE XXA 1 ; VARIABLE AXA 1 ;
+      VARIABLE XAA 1 ; VARIABLE AAA 1 ;
+
+      OV 3 1 0 ;
+
+    IF IEL=1 ;
+    { Setup MAP from GIOS output:
+      (X,X  )= 7.071067812E-01  (A,X  )=-7.071067812E-01
+      (X,A  )= 7.071067812E-01  (A,A  )= 7.071067812E-01
+      (X,XX )=-5.000000000E-01  (A,XX )=-5.000000000E-01
+      (X,XA )= 2.928932188E-01  (A,XA )=-7.071067812E-01
+      (X,AA )= 2.071067812E-01  (A,AA )=-2.071067812E-01    }
+
+      XX  := 7.071067812E-01 ; AX  :=-7.071067812E-01 ;
+      XA  := 7.071067812E-01 ; AA  := 7.071067812E-01 ;
+      XXX :=-5.000000000E-01 ; AXX :=-5.000000000E-01 ;
+      XXA := 2.928932188E-01 ; AXA :=-7.071067812E-01 ;
+      XAA := 2.071067812E-01 ; AAA :=-2.071067812E-01 ;
+    ELSEIF IEL=2 ;
+    { Setup MAP from GIOS output:
+      (X,X  )= 4.440158574E-01  (A,X  )=-1.267162098E+00
+      (X,A  )= 6.335810705E-01  (A,A  )= 4.440158574E-01
+      (X,XX )=-1.029322250E+00  (A,XX )=-9.613804652E-01
+      (X,XA )=-1.883613764E-01  (A,XA )=-1.399620967E+00
+      (X,AA )= 9.767302679E-02  (A,AA )=-4.696813690E-01     }
+
+      XX  := 4.440158574E-01 ; AX  :=-1.267162098E+00 ;
+      XA  := 6.335810705E-01 ; AA  := 4.440158574E-01 ;
+      XXX :=-1.029322250E+00 ; AXX :=-9.613804652E-01 ;
+      XXA :=-1.883613764E-01 ; AXA :=-1.399620967E+00 ;
+      XAA := 9.767302679E-02 ; AAA :=-4.696813690E-01 ;
+    ENDIF ;
+
+      MAP(1) := XX*DA(1)+XA*DA(2)
+               +XXX*DA(1)*DA(1)+XXA*DA(1)*DA(2)+XAA*DA(2)*DA(2) ;
+      MAP(2) := AX*DA(1)+AA*DA(2)
+               +AXX*DA(1)*DA(1)+AXA*DA(1)*DA(2)+AAA*DA(2)*DA(2) ;
+
+      WRITE 6 'TRANSFER MAP COMPUTED USING THE PROGRAM GIOS' '' ;
+      WRITE 6 'X_f' MAP(1) 'A_f' MAP(2) ;
+   ENDPROCEDURE ;
+
+
+{Menu setup}
+SEL(1) := '1: Spherical' ;   NMTD(1) := 4 ;
+SEL(2) := '2: Cylindrical' ; NMTD(2) := 3 ;
+SMTD(1,1) := '1. DA integration of ODEs in lab coordinates (it takes ~1min)' ;
+SMTD(1,2) := '2. Analytical solution using Kepler theory in lab coordinates' ;
+SMTD(1,3) := '3. ESP, COSY''s built-in element' ;
+SMTD(1,4) := '4. GIOS result analysis' ;
+SMTD(2,1) := '1. DA integration of ODEs in lab coordinates (it takes ~1min)' ;
+SMTD(2,2) := '2. ECL, COSY''s built-in element' ;
+SMTD(2,3) := '3. GIOS result analysis' ;
+
+{Menu}
+WRITE 6 '' 'Choose the electrostatic deflector.  '&SEL(1)&',  '&SEL(2) ;
+READ 5 IEL ;
+   IF (IEL=1)+(IEL=2) ; WRITE 6 ' -- '&SEL(IEL)&' is chosen.' ;
+   ELSEIF LO(1) ; WRITE 6 ' -- Wrong choice of deflector!' ; QUIT 0 ;
+   ENDIF ;
+
+WRITE 6 '' 'Choose the computation method.' ;
+LOOP IMTD 1 NMTD(IEL) ; WRITE 6 '  '&SMTD(IEL,IMTD) ; ENDLOOP ;
+READ 5 MTD ;
+   LMTD := LO(1) ;
+   LOOP IMTD 1 NMTD(IEL) ;
+      IF MTD=IMTD ; LMTD := LO(0) ;
+         WRITE 6 ' -- '&SMTD(IEL,MTD)&'   is chosen.' ; ENDIF ; ENDLOOP ;
+   IF LMTD ; WRITE 6 ' -- Wrong choice of method!' ; QUIT 0 ; ENDIF ;
+WRITE 6 '' '' ;
+
+PICK := SMTD(IEL,MTD)|4 ;
+
+{Computation}
+IF     PICK='D' ; RUNODE ;
+ELSEIF PICK='A' ; RUNKEPLER ;
+ELSEIF PICK='E' ; RUNCOSY ;
+ELSEIF PICK='G' ; RUNGIOS ;
+ENDIF ;
+
+G123 ;
+
+ENDPROCEDURE ; 
+
+RUN ; END ;
